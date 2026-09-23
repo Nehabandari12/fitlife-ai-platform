@@ -1,4 +1,4 @@
-# FitLife Connect — AI-Driven Fitness Tracking Platform
+#fitlife — AI-Driven Fitness Tracking Platform
 
 An event-driven, microservices-based fitness platform that delivers **personalized AI workout recommendations** in real time using Google Gemini, Apache Kafka, and Spring Cloud.
 
