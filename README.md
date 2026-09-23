@@ -6,7 +6,7 @@ An event-driven, microservices-based fitness platform that delivers **personaliz
 
 ## 🏗️ Architecture Overview
 
-FitLife Connect is built as a distributed system with 6 independently deployable microservices, secured by OAuth2 PKCE and orchestrated via an API Gateway.
+fitlife-ai-platform is built as a distributed system with 6 independently deployable microservices, secured by OAuth2 PKCE and orchestrated via an API Gateway.
 
 ```
 React Frontend (Vite + Redux)
