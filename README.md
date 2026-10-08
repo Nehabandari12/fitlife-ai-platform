@@ -119,8 +119,8 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:5173. The app sends you to Keycloak; use **Register** there (or **Sign Up** in the
-app) to create an account, then log a workout. Its recommendation appears on the workout's page a few
+Open http://localhost:5173. The app sends you straight to Keycloak's sign-in page; use **Register**
+there to create an account, then log a workout. Its recommendation appears on the workout's page a few
 seconds later.
 
 | Other ports | |
