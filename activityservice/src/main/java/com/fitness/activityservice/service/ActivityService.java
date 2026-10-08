@@ -5,15 +5,19 @@ import com.fitness.activityservice.dto.ActivityRequest;
 import com.fitness.activityservice.dto.ActivityResponse;
 import com.fitness.activityservice.model.Activity;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ActivityService {
 
     private final ActivityRepository activityRepository;
@@ -26,12 +30,10 @@ public class ActivityService {
     @Value("${kafka.topic.delete-name}")
     private String deleteTopicName;
 
-    public ActivityResponse trackActivity(ActivityRequest request) {
+    public ActivityResponse trackActivity(ActivityRequest request, String bearerToken) {
 
-        boolean isValidUser = userValidationService.validateUser(request.getUserId());
-
-        if (!isValidUser) {
-            throw new RuntimeException("Invalid User: " + request.getUserId());
+        if (!userValidationService.validateUser(request.getUserId(), bearerToken)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Unknown user");
         }
 
         Activity activity = Activity.builder()
@@ -44,14 +46,7 @@ public class ActivityService {
                 .build();
 
         Activity savedActivity = activityRepository.save(activity);
-
-        try {
-            kafkaTemplate.send(topicName, savedActivity.getUserId(), savedActivity);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-
+        publish(topicName, savedActivity.getUserId(), savedActivity, "create");
         return mapToResponse(savedActivity);
     }
 
@@ -79,33 +74,15 @@ public class ActivityService {
     }
 
     public void deleteActivity(String activityId, String userId) {
-        Activity activity = activityRepository.findById(activityId)
-                .orElseThrow(() -> new RuntimeException("Activity not found: " + activityId));
-
-        // simple ownership check
-        if (!activity.getUserId().equals(userId)) {
-            throw new RuntimeException("You are not allowed to delete this activity");
-        }
-
-        // 1) delete from activity DB
+        Activity activity = ownedActivity(activityId, userId);
         activityRepository.delete(activity);
-
-        // 2) send delete-event to Kafka (AI service will clean up recommendation)
-        try {
-            kafkaTemplate.send(deleteTopicName, activity.getId(), activity);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        // The AI service deletes the recommendation when it receives this event.
+        publish(deleteTopicName, activity.getId(), activity, "delete");
     }
 
 
     public ActivityResponse updateActivity(String activityId, ActivityRequest request) {
-        Activity existing = activityRepository.findById(activityId)
-                .orElseThrow(() -> new RuntimeException("Activity not found"));
-
-        if (!existing.getUserId().equals(request.getUserId())) {
-            throw new RuntimeException("You cannot modify this activity");
-        }
+        Activity existing = ownedActivity(activityId, request.getUserId());
 
         // Update mutable fields
         existing.setType(request.getType());
@@ -115,23 +92,37 @@ public class ActivityService {
         existing.setAdditionalMetrics(request.getAdditionalMetrics());
 
         Activity updated = activityRepository.save(existing);
-
-        kafkaTemplate.send(topicName, updated.getUserId(), updated);
-
+        publish(topicName, updated.getUserId(), updated, "update");
         return mapToResponse(updated);
     }
 
     public ActivityResponse getActivityById(String activityId, String userId) {
-        Activity activity = activityRepository.findById(activityId)
-                .orElseThrow(() -> new RuntimeException("Activity not found: " + activityId));
-
-        // Optional but recommended: ensure this activity belongs to the logged-in user
-        if (!activity.getUserId().equals(userId)) {
-            throw new RuntimeException("You are not allowed to view this activity");
-        }
-
-        return mapToResponse(activity);
+        return mapToResponse(ownedActivity(activityId, userId));
     }
 
+    /**
+     * Another user's activity gets the same 404 as a missing one, so ids can't be probed.
+     */
+    private Activity ownedActivity(String activityId, String userId) {
+        return activityRepository.findById(activityId)
+                .filter(activity -> activity.getUserId().equals(userId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Activity not found"));
+    }
 
+    /**
+     * Kafka sends are asynchronous: the producer retries on its own until delivery.timeout.ms, and a
+     * send that still fails is only reported here. The activity itself is already saved, so the
+     * request succeeds; the recommendation for it is then missing (see README, "Consistency").
+     */
+    private void publish(String topic, String key, Activity activity, String kind) {
+        try {
+            kafkaTemplate.send(topic, key, activity).whenComplete((result, error) -> {
+                if (error != null) {
+                    log.error("Could not publish {} event for activity {}: {}", kind, activity.getId(), error.getMessage());
+                }
+            });
+        } catch (RuntimeException e) {
+            log.error("Could not publish {} event for activity {}: {}", kind, activity.getId(), e.getMessage());
+        }
+    }
 }

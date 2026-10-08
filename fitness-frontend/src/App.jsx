@@ -1,7 +1,7 @@
 import { useContext, useEffect } from "react"
 import { AuthContext } from "react-oauth2-code-pkce"
 import { useDispatch } from "react-redux";
-import { BrowserRouter as Router, Navigate, Route, Routes, useNavigate } from "react-router"
+import { BrowserRouter as Router, Navigate, Route, Routes } from "react-router"
 import { logout, setCredentials } from "./store/authSlice";
 import ActivityForm from "./components/ActivityForm";
 import ActivityList from "./components/ActivityList";
@@ -15,7 +15,7 @@ const HomePage = ({ isAuthenticated }) => {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900">
         <div className="text-center">
-          <h1 className="text-4xl font-bold mb-4 text-white">Welcome to Fitness Freak!</h1>
+          <h1 className="text-4xl font-bold mb-4 text-white">Welcome to FitLife</h1>
           <p className="text-xl text-gray-300">Please login to continue</p>
         </div>
       </div>

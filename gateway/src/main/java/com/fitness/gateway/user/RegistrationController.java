@@ -2,6 +2,7 @@ package com.fitness.gateway.user;
 
 
 import com.fitness.gateway.KeycloakAdminClient;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +18,7 @@ public class RegistrationController {
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public Mono<ResponseEntity<String>> register(@RequestBody RegisterRequest request) {
+    public Mono<ResponseEntity<String>> register(@Valid @RequestBody RegisterRequest request) {
 
         return keycloakAdminClient.createUser(
                         request.getEmail(),

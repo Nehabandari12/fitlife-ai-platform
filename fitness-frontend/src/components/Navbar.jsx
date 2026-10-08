@@ -91,7 +91,7 @@ const Navbar = ({ isAuthenticated, tokenData, onLogin, onLogout }) => {
     <>
       <div className='fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36 py-5 bg-black/70 backdrop-blur'>
         <Link to='/' className='text-white font-bold text-xl'>
-          Fitness Freak
+          FitLife
         </Link>
 
         {/* Desktop Navigation */}

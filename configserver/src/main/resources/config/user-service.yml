@@ -1,18 +1,27 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/fitness-micro-user
-    username: postgres
-    password: admin@12345
+    url: ${USER_DB_URL:jdbc:postgresql://localhost:5432/fitness-micro-user}
+    username: ${POSTGRES_USER:postgres}
+    # Local-development default; it must match POSTGRES_PASSWORD in docker-compose.yml.
+    password: ${POSTGRES_PASSWORD:fitlife-local-dev}
 
   jpa:
     hibernate:
       ddl-auto: update
     database-platform: org.hibernate.dialect.PostgreSQLDialect
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8181}/realms/fitness-app/protocol/openid-connect/certs
 
 eureka:
+  instance:
+    # Register by IP: a machine's own hostname often doesn't resolve for the other services.
+    prefer-ip-address: true
   client:
     serviceUrl:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
 
 server:
   port: 8081

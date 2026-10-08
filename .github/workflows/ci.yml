@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Unit and web-layer tests per service. They need no database, Kafka, Keycloak or Gemini key;
+  # the full-stack context tests are opt-in (FITLIFE_STACK_TESTS=1) and don't run here.
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [configserver, eureka, gateway, userservice, activityservice, aiservice]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Test ${{ matrix.service }}
+        working-directory: ${{ matrix.service }}
+        run: ./mvnw -B verify
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fitness-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: fitness-frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

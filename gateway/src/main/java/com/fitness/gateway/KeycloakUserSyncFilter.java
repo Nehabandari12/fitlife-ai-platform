@@ -2,83 +2,74 @@ package com.fitness.gateway;
 
 import com.fitness.gateway.user.RegisterRequest;
 import com.fitness.gateway.user.UserService;
-import com.nimbusds.jwt.JWTClaimsSet;
-import com.nimbusds.jwt.SignedJWT;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
-import java.text.ParseException;
+import java.util.Optional;
 
+/**
+ * Sets X-User-ID for downstream services from the JWT that Spring Security has already validated,
+ * and creates the user in the user service on first sight.
+ *
+ * Whatever X-User-ID the client sent is removed first, so a caller can never choose the identity
+ * downstream services see. Without an authenticated principal (the public /api/auth/** routes, or
+ * if this filter ever ran before authentication) the request goes on with no X-User-ID at all.
+ */
 @Component
 @Slf4j
 @RequiredArgsConstructor
 public class KeycloakUserSyncFilter implements WebFilter {
-    
+
+    public static final String USER_ID_HEADER = "X-User-ID";
+
     private final UserService userService;
-    
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        String path = exchange.getRequest().getPath().value();
-        if (path.startsWith("/api/auth/")) {
-            return chain.filter(exchange);
-        }
+        ServerWebExchange stripped = exchange.mutate()
+                .request(request -> request.headers(headers -> headers.remove(USER_ID_HEADER)))
+                .build();
 
-        String userId = exchange.getRequest().getHeaders().getFirst("X-User-ID");
-        String token = exchange.getRequest().getHeaders().getFirst("Authorization");
-        RegisterRequest registerRequest = getUserDetails(token);
-        if (userId == null) {
-            userId = registerRequest.getKeycloakId();
-        }
-
-        if (userId != null && token != null) {
-            String finalUserId = userId;
-            return userService.validateUser(userId)
-                    .flatMap(exist -> {
-                        if (!exist) {
-                            if (registerRequest != null) {
-                                return userService.registerUser(registerRequest)
-                                        .then(Mono.empty());
-                            } else {
-                                return Mono.empty();
-                            }
-                        } else {
-                            log.info("User already exist, Skipping sync");
-                            return Mono.empty();
-                        }
-                    })
-                    .then(Mono.defer(() -> {
-                        ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                                .header("X-User-ID", finalUserId)
-                                .build();
-                        return chain.filter(exchange.mutate().request(mutatedRequest).build());
-                    }));
-        }
-
-        return chain.filter(exchange);
+        return stripped.getPrincipal()
+                .filter(JwtAuthenticationToken.class::isInstance)
+                .map(principal -> Optional.of(((JwtAuthenticationToken) principal).getToken()))
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(jwt -> jwt.isEmpty()
+                        ? chain.filter(stripped)
+                        : syncUser(jwt.get()).then(Mono.defer(() -> chain.filter(withUserId(stripped, jwt.get())))));
     }
 
-    private RegisterRequest getUserDetails(String token) {
-        try {
-            String tokenWithoutBearer = token.replace("Bearer", "").trim();
-            SignedJWT signedJWT = SignedJWT.parse(tokenWithoutBearer);
-            JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+    private static ServerWebExchange withUserId(ServerWebExchange exchange, Jwt jwt) {
+        return exchange.mutate()
+                .request(request -> request.header(USER_ID_HEADER, jwt.getSubject()))
+                .build();
+    }
 
-            RegisterRequest request = new RegisterRequest();
-            request.setEmail(claims.getStringClaim("email"));
-            request.setKeycloakId(claims.getStringClaim("sub"));
-            request.setFirstName(claims.getStringClaim("given_name"));
-            request.setLastName(claims.getStringClaim("family_name"));
-            request.setPassword("dummy@123123");
+    private Mono<Void> syncUser(Jwt jwt) {
+        String bearer = jwt.getTokenValue();
+        return userService.validateUser(jwt.getSubject(), bearer)
+                .flatMap(exists -> {
+                    if (exists) {
+                        return Mono.empty();
+                    }
+                    log.info("First request from user {}; registering in the user service", jwt.getSubject());
+                    return userService.registerUser(fromClaims(jwt), bearer).then();
+                });
+    }
 
-            return request;
-        } catch (ParseException e) {
-            throw new RuntimeException(e);
-        }
+    static RegisterRequest fromClaims(Jwt jwt) {
+        RegisterRequest request = new RegisterRequest();
+        request.setKeycloakId(jwt.getSubject());
+        request.setEmail(jwt.getClaimAsString("email"));
+        request.setFirstName(jwt.getClaimAsString("given_name"));
+        request.setLastName(jwt.getClaimAsString("family_name"));
+        return request;
     }
 }

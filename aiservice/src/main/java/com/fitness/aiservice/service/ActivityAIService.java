@@ -1,143 +1,105 @@
 package com.fitness.aiservice.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fitness.aiservice.model.Activity;
-import com.fitness.aiservice.model.ActivityType;
 import com.fitness.aiservice.model.Recommendation;
-import lombok.AllArgsConstructor;
+import com.fitness.aiservice.model.RecommendationStatus;
+import com.fitness.aiservice.service.AiResponseException.Reason;
+import com.fitness.aiservice.service.RecommendationParser.Advice;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+/**
+ * Builds recommendations from the model's reply. When the model fails or replies with something
+ * unusable, the result is a fixed fallback marked FALLBACK with the reason, never an exception: the
+ * Kafka listener must not retry (and pay for) a model call because of a bad reply. Prompts and
+ * replies are not logged, because they describe a person's workouts.
+ */
 @Service
 @Slf4j
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class ActivityAIService {
-    private final GeminiService geminiService;
+    static final String USER_SUMMARY = "USER_SUMMARY";
 
+    private final TextGenerator textGenerator;
     private final ObjectMapper objectMapper;
 
     public Recommendation generateRecommendation(Activity activity) {
-        String prompt = createPromptForActivity(activity);
-        String aiResponse = geminiService.getRecommendations(prompt);
-        log.info("RESPONSE FROM AI {} ", aiResponse);
-        return processAIResponse(activity, aiResponse);
-    }
-
-    private Recommendation processAIResponse(Activity activity, String aiResponse) {
+        String type = activity.getType() == null ? "OTHER" : activity.getType().toString();
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(aiResponse);
-            JsonNode textNode = rootNode.path("candidates")
-                    .get(0)
-                    .path("content")
-                    .get("parts")
-                    .get(0)
-                    .path("text");
-
-            String jsonContent = textNode.asText()
-                    .replaceAll("```json\\n","")
-                    .replaceAll("\\n```","")
-                    .trim();
-
-//            log.info("RESPONSE FROM CLEANED AI {} ", jsonContent);
-
-            JsonNode analysisJson = mapper.readTree(jsonContent);
-            JsonNode analysisNode = analysisJson.path("analysis");
-            StringBuilder fullAnalysis = new StringBuilder();
-            addAnalysisSection(fullAnalysis, analysisNode, "overall", "Overall:");
-            addAnalysisSection(fullAnalysis, analysisNode, "pace", "Pace:");
-            addAnalysisSection(fullAnalysis, analysisNode, "heartRate", "Heart Rate:");
-            addAnalysisSection(fullAnalysis, analysisNode, "caloriesBurned", "Calories:");
-
-            List<String> improvements = extractImprovements(analysisJson.path("improvements"));
-            List<String> suggestions = extractSuggestions(analysisJson.path("suggestions"));
-            List<String> safety = extractSafetyGuidelines(analysisJson.path("safety"));
-
-            return Recommendation.builder()
-                    .activityId(activity.getId())
-                    .userId(activity.getUserId())
-                    .type(activity.getType().toString())
-                    .recommendation(fullAnalysis.toString().trim())
-                    .improvements(improvements)
-                    .suggestions(suggestions)
-                    .safety(safety)
-                    .createdAt(LocalDateTime.now())
-                    .build();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return createDefaultRecommendation(activity);
+            Advice advice = RecommendationParser.parse(objectMapper, textGenerator.generate(createPromptForActivity(activity)));
+            return generated(activity.getId(), activity.getUserId(), type, advice);
+        } catch (AiResponseException e) {
+            log.warn("Recommendation for activity {} uses the fallback: {} ({})", activity.getId(), e.getReason(), e.getMessage());
+            return fallback(activity.getId(), activity.getUserId(), type, e.getReason(),
+                    "Unable to generate detailed analysis",
+                    List.of("Continue with your current routine"),
+                    List.of("Consider consulting a fitness consultant"));
         }
     }
 
-    private Recommendation createDefaultRecommendation(Activity activity) {
+    /** One summary over a user's generated recommendations. The user id is not sent to the model. */
+    public Recommendation generateUserCombinedRecommendation(String userId, List<Recommendation> recs) {
+        try {
+            String prompt = createPromptForUserFromRecommendations(objectMapper.writeValueAsString(recs.stream().map(ActivityAIService::forPrompt).toList()));
+            Advice advice = RecommendationParser.parse(objectMapper, textGenerator.generate(prompt));
+            return generated(null, userId, USER_SUMMARY, advice);
+        } catch (AiResponseException e) {
+            log.warn("Summary for user {} uses the fallback: {} ({})", userId, e.getReason(), e.getMessage());
+            return fallback(null, userId, USER_SUMMARY, e.getReason(),
+                    "Unable to generate combined recommendation from existing records.",
+                    List.of("Review individual activity recommendations."),
+                    List.of("Continue tracking workouts and recommendations."));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("could not serialize recommendations", e);
+        }
+    }
+
+    private static Map<String, Object> forPrompt(Recommendation rec) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("type", rec.getType());
+        item.put("recommendation", rec.getRecommendation());
+        item.put("improvements", rec.getImprovements());
+        item.put("suggestions", rec.getSuggestions());
+        item.put("safety", rec.getSafety());
+        return item;
+    }
+
+    private static Recommendation generated(String activityId, String userId, String type, Advice advice) {
         return Recommendation.builder()
-                .activityId(activity.getId())
-                .userId(activity.getUserId())
-                .type(activity.getType().toString())
-                .recommendation("Unable to generate detailed analysis")
-                .improvements(Collections.singletonList("Continue with your current routine"))
-                .suggestions(Collections.singletonList("Consider consulting a fitness consultant"))
-                .safety(Arrays.asList(
-                        "Always warm up before exercise",
-                        "Stay hydrated",
-                        "Listen to your body"
-                ))
+                .activityId(activityId)
+                .userId(userId)
+                .type(type)
+                .recommendation(advice.analysis())
+                .improvements(advice.improvements())
+                .suggestions(advice.suggestions())
+                .safety(advice.safety())
+                .status(RecommendationStatus.GENERATED)
                 .createdAt(LocalDateTime.now())
                 .build();
     }
 
-    private List<String> extractSafetyGuidelines(JsonNode safetyNode) {
-        List<String> safety = new ArrayList<>();
-        if (safetyNode.isArray()) {
-            safetyNode.forEach(item -> safety.add(item.asText()));
-        }
-        return safety.isEmpty() ?
-                Collections.singletonList("Follow general safety guidelines") :
-                safety;
-    }
-
-    private List<String> extractSuggestions(JsonNode suggestionsNode) {
-        List<String> suggestions = new ArrayList<>();
-        if (suggestionsNode.isArray()) {
-            suggestionsNode.forEach(suggestion -> {
-                String workout = suggestion.path("workout").asText();
-                String description = suggestion.path("description").asText();
-                suggestions.add(String.format("%s: %s", workout, description));
-            });
-        }
-        return suggestions.isEmpty() ?
-                Collections.singletonList("No specific suggestions provided") :
-                suggestions;
-    }
-
-    private List<String> extractImprovements(JsonNode improvementsNode) {
-        List<String> improvements = new ArrayList<>();
-        if (improvementsNode.isArray()) {
-            improvementsNode.forEach(improvement -> {
-                String area = improvement.path("area").asText();
-                String detail = improvement.path("recommendation").asText();
-                improvements.add(String.format("%s: %s", area, detail));
-            });
-        }
-        return improvements.isEmpty() ?
-                Collections.singletonList("No specific improvements provided") :
-                improvements;
-
-    }
-
-    //    "overall": "This was an excellent"
-    // Overall: This was an excellent
-    private void addAnalysisSection(StringBuilder fullAnalysis, JsonNode analysisNode, String key, String prefix) {
-    if (!analysisNode.path(key).isMissingNode()){
-     fullAnalysis.append(prefix)
-             .append(analysisNode.path(key).asText())
-             .append("\n\n");
-    }
+    private static Recommendation fallback(String activityId, String userId, String type, Reason reason,
+                                           String text, List<String> improvements, List<String> suggestions) {
+        return Recommendation.builder()
+                .activityId(activityId)
+                .userId(userId)
+                .type(type)
+                .recommendation(text)
+                .improvements(improvements)
+                .suggestions(suggestions)
+                .safety(List.of("Always warm up before exercise", "Stay hydrated", "Listen to your body"))
+                .status(RecommendationStatus.FALLBACK)
+                .fallbackReason(reason.name())
+                .createdAt(LocalDateTime.now())
+                .build();
     }
 
     private String createPromptForActivity(Activity activity) {
@@ -173,7 +135,7 @@ public class ActivityAIService {
         Duration: %d minutes
         Calories Burned: %d
         Additional Metrics: %s
-        
+
         Provide detailed analysis focusing on performance, improvements, next workout suggestions, and safety guidelines.
         Ensure the response follows the EXACT JSON format shown above.
         """,
@@ -184,46 +146,7 @@ public class ActivityAIService {
         );
     }
 
-    public Recommendation generateUserCombinedRecommendation(String userId, List<Recommendation> recs) {
-        try {
-            String existingRecsJson = objectMapper.writeValueAsString(recs);
-
-            String prompt = createPromptForUserFromRecommendations(userId, existingRecsJson);
-            String aiResponse = geminiService.getRecommendations(prompt);
-            log.info("USER-LEVEL RESPONSE FROM AI: {}", aiResponse);
-
-            // Use dummy activity just to reuse processAIResponse()
-            Activity dummy = new Activity();
-            dummy.setId(null);
-            dummy.setUserId(userId);
-            dummy.setType(ActivityType.OTHER);
-            dummy.setDuration(null);
-            dummy.setCaloriesBurned(null);
-            dummy.setAdditionalMetrics(Map.of("recommendationsCount", recs.size()));
-
-            Recommendation combined = processAIResponse(dummy, aiResponse);
-            combined.setType("USER_SUMMARY");   // mark it as a combined one
-            return combined;
-        } catch (Exception e) {
-            e.printStackTrace();
-            // Fallback if AI fails
-            return Recommendation.builder()
-                    .userId(userId)
-                    .type("USER_SUMMARY")
-                    .recommendation("Unable to generate combined recommendation from existing records.")
-                    .improvements(Collections.singletonList("Review individual activity recommendations."))
-                    .suggestions(Collections.singletonList("Continue tracking workouts and recommendations."))
-                    .safety(Arrays.asList(
-                            "Warm up properly",
-                            "Stay hydrated",
-                            "Listen to your body"
-                    ))
-                    .createdAt(LocalDateTime.now())
-                    .build();
-        }
-    }
-
-    private String createPromptForUserFromRecommendations(String userId, String recsJsonArray) {
+    private String createPromptForUserFromRecommendations(String recsJsonArray) {
         return String.format("""
         You are an expert fitness coach.
 
@@ -234,8 +157,6 @@ public class ActivityAIService {
         - improvements
         - suggestions
         - safety tips
-
-        USER ID: %s
 
         ACTIVITY-LEVEL RECOMMENDATIONS (JSON ARRAY):
         %s
@@ -270,8 +191,6 @@ public class ActivityAIService {
         }
 
         Focus on patterns across ALL activities (e.g., low intensity, poor tracking, consistency).
-        """, userId, recsJsonArray);
+        """, recsJsonArray);
     }
-
-
 }

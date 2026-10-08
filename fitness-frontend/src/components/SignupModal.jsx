@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, UserPlus, Mail, Lock, User, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { API_URL } from '../services/api';
 
 const SignupModal = ({ isOpen, onClose, onSignupSuccess }) => {
   const [formData, setFormData] = useState({
@@ -67,7 +68,7 @@ const SignupModal = ({ isOpen, onClose, onSignupSuccess }) => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8080/api/auth/register', {
+      const response = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -126,7 +127,7 @@ const SignupModal = ({ isOpen, onClose, onSignupSuccess }) => {
             <UserPlus className="text-white" size={32} />
           </div>
           <h2 className="text-3xl font-bold text-white text-center mb-2">Create Account</h2>
-          <p className="text-gray-400 text-center">Join Fitness Freak today!</p>
+          <p className="text-gray-400 text-center">Join FitLife today!</p>
         </div>
 
         {success && (
