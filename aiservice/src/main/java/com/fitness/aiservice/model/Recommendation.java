@@ -24,6 +24,10 @@ public class Recommendation {
     private List<String> improvements;
     private List<String> suggestions;
     private List<String> safety;
+    /** GENERATED, or FALLBACK when the model failed; the UI says so instead of passing generic advice off as analysis. */
+    private RecommendationStatus status;
+    /** Why the fallback was used (see AiResponseException.Reason); null when generated. */
+    private String fallbackReason;
 
     @CreatedDate
     private LocalDateTime createdAt;
