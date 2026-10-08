@@ -6,7 +6,9 @@ import com.fitness.userservice.dto.UserResponse;
 import com.fitness.userservice.models.User;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @AllArgsConstructor
@@ -15,19 +17,17 @@ public class UserService {
 
     private final UserRepository repository;
 
+    /**
+     * Idempotent: registering an existing Keycloak user returns their profile. An email that already
+     * belongs to a different user is a conflict, and nothing about that user is returned.
+     */
     public UserResponse register(RegisterRequest request) {
-
-        if (repository.existsByEmail(request.getEmail())) {
-            User existingUser = repository.findByEmail(request.getEmail());
-            UserResponse userResponse = new UserResponse();
-            userResponse.setId(existingUser.getId());
-            userResponse.setPassword(existingUser.getPassword());
-            userResponse.setEmail(existingUser.getEmail());
-            userResponse.setFirstName(existingUser.getFirstName());
-            userResponse.setLastName(existingUser.getLastName());
-            userResponse.setCreatedAt(existingUser.getCreatedAt());
-            userResponse.setUpdatedAt(existingUser.getUpdatedAt());
-            return userResponse;
+        var existing = repository.findByKeycloakId(request.getKeycloakId());
+        if (existing.isPresent()) {
+            return toResponse(existing.get());
+        }
+        if (request.getEmail() != null && repository.existsByEmail(request.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already registered");
         }
 
         User user = new User();
@@ -35,38 +35,29 @@ public class UserService {
         user.setFirstName(request.getFirstName());
         user.setKeycloakId(request.getKeycloakId());
         user.setLastName(request.getLastName());
-        user.setPassword(request.getPassword());
-
-        User savedUser = repository.save(user);
-        UserResponse userResponse = new UserResponse();
-        userResponse.setId(savedUser.getId());
-        userResponse.setPassword(savedUser.getPassword());
-        userResponse.setKeycloakId(savedUser.getKeycloakId());
-        userResponse.setEmail(savedUser.getEmail());
-        userResponse.setFirstName(savedUser.getFirstName());
-        userResponse.setLastName(savedUser.getLastName());
-        userResponse.setCreatedAt(savedUser.getCreatedAt());
-        userResponse.setUpdatedAt(savedUser.getUpdatedAt());
-        return userResponse;
+        return toResponse(repository.save(user));
     }
 
     public UserResponse getUserProfile(String userId) {
         User user = repository.findByKeycloakId(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        UserResponse userResponse = new UserResponse();
-        userResponse.setId(user.getId());
-        userResponse.setPassword(user.getPassword());
-        userResponse.setEmail(user.getEmail());
-        userResponse.setFirstName(user.getFirstName());
-        userResponse.setLastName(user.getLastName());
-        userResponse.setCreatedAt(user.getCreatedAt());
-        userResponse.setUpdatedAt(user.getUpdatedAt());
-        return userResponse;
-
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        return toResponse(user);
     }
 
     public Boolean existByUserId(String userId) {
-        log.info("Calling User Service for {}", userId);
+        log.debug("Checking user {}", userId);
         return repository.existsByKeycloakId(userId);
+    }
+
+    private static UserResponse toResponse(User user) {
+        UserResponse response = new UserResponse();
+        response.setId(user.getId());
+        response.setKeycloakId(user.getKeycloakId());
+        response.setEmail(user.getEmail());
+        response.setFirstName(user.getFirstName());
+        response.setLastName(user.getLastName());
+        response.setCreatedAt(user.getCreatedAt());
+        response.setUpdatedAt(user.getUpdatedAt());
+        return response;
     }
 }
