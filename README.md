@@ -12,11 +12,7 @@ on the host). It is not deployed. Verified end to end on 6 Oct 2026; see [Verifi
 |---|---|
 | ![Activity form with type, duration, calories and optional details](docs/screenshots/activity-entry.png) | ![Three logged workouts: running, cycling and yoga](docs/screenshots/activity-history.png) |
 
-![AI recommendation panel showing the notice that the AI analysis was unavailable and general guidance is shown instead](docs/screenshots/activity-recommendation.png)
-
-The recommendation above was captured without a Gemini key, so it shows the marked fallback; with
-`GEMINI_KEY` set, the same panel shows the model's analysis, improvements, suggestions and safety notes.
-The data in the screenshots is a synthetic demo user.
+The screenshots show a synthetic demo user.
 
 ## What it does
 
@@ -69,6 +65,11 @@ Three decisions shape it:
 3. **The model's reply is untrusted input.** It must parse as the JSON the prompt asks for; anything
    else, a timeout, an HTTP error or a blocked prompt becomes a `FALLBACK` recommendation with the
    reason, which the UI shows. Prompts and replies are not logged, and the user id is not sent to Gemini.
+
+   This is what a user sees when no Gemini key is configured; with a key, the same panel shows the
+   model's analysis, improvements, suggestions and safety notes:
+
+   ![AI recommendation panel with a notice that the AI analysis was unavailable and general guidance is shown instead](docs/screenshots/activity-recommendation.png)
 
 ## Quickstart
 
