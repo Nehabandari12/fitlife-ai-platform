@@ -1,20 +1,26 @@
 eureka:
+  instance:
+    # Register by IP: a machine's own hostname often doesn't resolve for the other services.
+    prefer-ip-address: true
   client:
+    # Local development: see new instances within seconds (the default is 30 s).
+    registry-fetch-interval-seconds: 5
     serviceUrl:
-      defaultZone: http://localhost:8761/eureka
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
 keycloak:
   admin:
-    server-url: http://localhost:8181
+    server-url: ${KEYCLOAK_URL:http://localhost:8181}
     realm: fitness-app
     client-id: fitlife-backend
-    client-secret: LQcmBO2yZ2m7yCFZNSaiFzIthMeABT3I
+    # Local-development default; it must match FITLIFE_BACKEND_CLIENT_SECRET in docker-compose.yml.
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:fitlife-local-dev-client-secret}
 
 spring:
   security:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: http://localhost:8181/realms/fitness-app/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8181}/realms/fitness-app/protocol/openid-connect/certs
   cloud:
     gateway:
       server:

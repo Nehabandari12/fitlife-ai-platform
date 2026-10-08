@@ -1,0 +1,9 @@
+# IntelliJ per-user state; workspace.xml also stores run configurations and their environment variables.
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+*.iws
+
+# Local settings and secrets (see .env.example)
+.env
+.env.local

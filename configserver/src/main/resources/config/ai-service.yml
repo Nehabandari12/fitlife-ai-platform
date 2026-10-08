@@ -1,23 +1,33 @@
 spring:
   data:
     mongodb:
-      uri: mongodb://localhost:27017/airecommendationfitness
+      uri: ${AI_MONGODB_URI:mongodb://localhost:27017/airecommendationfitness}
       database: airecommendationfitness
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: activity-processor-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # An event that can't be read is logged and skipped instead of failing the consumer forever.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.fitness.aiservice.model.Activity
-        spring.json.trusted.packages: "*"
+        spring.json.trusted.packages: com.fitness.aiservice.model
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8181}/realms/fitness-app/protocol/openid-connect/certs
 
 gemini:
   api:
-    url: ${GEMINI_URL}
-    key: ${GEMINI_KEY}
+    # Without a key the service still runs; recommendations are then marked FALLBACK (NOT_CONFIGURED).
+    # gemini-flash-latest is Google's alias for its current Flash model; pin a model name for stable output.
+    url: ${GEMINI_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent}
+    key: ${GEMINI_KEY:}
+    timeout: ${GEMINI_TIMEOUT:20s}
 
 kafka:
   topic:
@@ -25,9 +35,12 @@ kafka:
     delete-name: activity-delete-events
 
 eureka:
+  instance:
+    # Register by IP: a machine's own hostname often doesn't resolve for the other services.
+    prefer-ip-address: true
   client:
     serviceUrl:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
 
 server:
   port: 8083

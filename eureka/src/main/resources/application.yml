@@ -3,6 +3,9 @@ spring:
     name: eureka
 
 eureka:
+  server:
+    # Local development: publish new registrations within seconds (the default is 30 s).
+    response-cache-update-interval-ms: 5000
   client:
     register-with-eureka: false
     fetch-registry: false

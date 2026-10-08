@@ -1,13 +1,18 @@
 spring:
   data:
     mongodb:
-      uri: mongodb://localhost:27017/aiactivityfitness
+      uri: ${ACTIVITY_MONGODB_URI:mongodb://localhost:27017/aiactivityfitness}
       database: aiactivityfitness
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8181}/realms/fitness-app/protocol/openid-connect/certs
 
 
 kafka:
@@ -16,10 +21,14 @@ kafka:
     delete-name: activity-delete-events
 
 eureka:
+  instance:
+    # Register by IP: a machine's own hostname often doesn't resolve for the other services.
+    prefer-ip-address: true
   client:
+    # Local development: see new instances within seconds (the default is 30 s).
+    registry-fetch-interval-seconds: 5
     serviceUrl:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
 
 server:
   port: 8082
-
