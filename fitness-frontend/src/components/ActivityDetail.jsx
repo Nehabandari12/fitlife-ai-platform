@@ -434,6 +434,15 @@ const ActivityDetail = () => {
 
         {!loadingRecommendation && recommendation && (
           <>
+            {recommendation.status === 'FALLBACK' && (
+              <div className="mb-6 flex items-center gap-2 text-yellow-300 bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                <AlertCircle size={20} />
+                <span>
+                  The AI analysis was unavailable ({recommendation.fallbackReason}), so this is general guidance,
+                  not an analysis of this activity.
+                </span>
+              </div>
+            )}
             {/* Analysis Section */}
             <div className="mb-8">
               <div className="flex items-center gap-2 mb-3">
